@@ -33,7 +33,6 @@ def format_inventory_data(df: pd.DataFrame) -> pd.DataFrame:
 stock_summary = pd.read_csv("./reports.csv", index_col=0)
 inv = format_inventory_data(stock_summary)
 inv['Commercial Crude (Excluding SPR)'] = inv['Crude Oil'] - inv['SPR']
-inv['Weekly Commercial Draw/Build'] = inv['Commercial Crude (Excluding SPR)'].diff()
 
 # Market Data
 wti = yf.Ticker("CL=F")
@@ -129,8 +128,6 @@ def build_figure(col: str = 'Commercial Crude (Excluding SPR)') -> go.Figure:
     )
     
     return fig
-
-
 
 app = Dash()
 

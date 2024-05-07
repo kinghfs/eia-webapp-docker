@@ -216,5 +216,5 @@ if __name__ == '__main__':
     print(f"Finished scraping EIA WPSRs")
     print(f"{len(df)} reports found")
     seconds = perf_counter() - start_t
-    print(f"That took {seconds//60:.0f}mins, {seconds%60:.2f}seconds")
+    print(f"That took {seconds//60:.0f}mins, {seconds%60:.2f}seconds", flush=True)
 
