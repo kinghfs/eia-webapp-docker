@@ -1,11 +1,11 @@
 # eia-webapp-docker
-<i>A lightweight web application to retrieve EIA Weekly Petroleum Supply Reports and generate an in-browser dashboard visualisation using Flask and Docker.
+<i>A lightweight web application to retrieve EIA Weekly Petroleum Supply Reports and generate an in-browser interactive dashboard visualisation using Dash and Plotly.
 
-![Example](dashboard_example.png)
+![Example](dash_example.png)
 
 ## Instructions
 ### Clone the repository
-<code>git clone https://github.com/kinghfs/eia-webapp-docker </code>
+<code>git clone https://github.com/kinghfs/eia-webapp-docker</code>
 
 ### Using Docker
 #### Build the Docker image
@@ -13,10 +13,10 @@ In the command line, execute:
 <code>docker build -t python-eia-dashboard .</code>
 
 #### Run the image in a container
-<code>docker run -p 5000:5000 python-eia-dashboard</code>
+<code>docker run -p 8050:8050 python-eia-dashboard</code>
 
 #### View dashboard in browser
-Navigate to localhost:5000 in your browser.
+Navigate to localhost:8050 in your browser.
 
 ### Without Docker
 #### Installing dependencies
