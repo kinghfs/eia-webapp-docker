@@ -15,14 +15,16 @@ import yfinance as yf
 
 from flask import Flask
 
+from async_scrape_eia import download_wpsr_since_date
+
 
 wall_st = pytz.timezone("America/New_York")
 mdate_fmt = mdates.DateFormatter('%m/%y')
 date_locator = mdates.AutoDateLocator(minticks=4, maxticks=8)
 
 def load_inventory_data():
-    df = pd.read_csv("reports.csv", index_col=0)
-    df.index = pd.to_datetime(df.index, utc=True).tz_convert(wall_st)
+    df = pd.read_csv('./reports.csv', index_col=0)
+    df.index = pd.to_datetime(df.index).tz_localize(wall_st)
     df = df.sort_index()
     return df
 
@@ -34,7 +36,8 @@ def add_inventory_features(df):
 
 def get_oil_data(days=365):
     wti = yf.Ticker("CL=F")
-    hist = wti.history(period="2y")
+    years = int(np.ceil(days/365)) + 1
+    hist = wti.history(period=f"{years}y")
     return hist
 
 def plot_oil_price(df, ax, days=365):
@@ -48,9 +51,9 @@ def plot_oil_price(df, ax, days=365):
     ax.set_ylabel("Price per barrel ($)")
     ax.xaxis.set_major_formatter(mdate_fmt)
 
-def plot_draw_build_bar(df, ax, days=24):
+def plot_draw_build_bar(df, ax, weeks=24):
     # Draw/Build
-    consider_df = df.tail(days)
+    consider_df = df.tail(weeks)
     builds = consider_df[consider_df['Weekly Commercial Draw/Build']>=0]
     draws = consider_df[consider_df['Weekly Commercial Draw/Build']<0]
     
@@ -63,9 +66,9 @@ def plot_draw_build_bar(df, ax, days=24):
     ax.xaxis.set_major_formatter(mdate_fmt)
     # ax.xaxis.set_major_locator(date_locator)
 
-def plot_draw_build_dist(df, ax, days=24):
+def plot_draw_build_dist(df, ax, weeks=24):
     # Boxplot of Draw/Build
-    consider_df = df.tail(days)
+    consider_df = df.tail(weeks)
     last_stock_change = consider_df['Weekly Commercial Draw/Build'].iloc[-1]
     
     ax.set_title("Commercial Inventory Change Distribution")
@@ -84,13 +87,11 @@ def plot_draw_build_dist(df, ax, days=24):
                      label="Last Reported Change") 
     
     ax.xaxis.set_ticklabels([])
-    # ax.sharey(axs[0][0])
     ax.legend()
-    ax.xaxis.set_major_formatter(mdate_fmt)
 
-def plot_spr_line(df, ax, days=104, references=dict()):
+def plot_spr_line(df, ax, weeks=104, references=dict()):
     # SPR Level
-    consider_df = df.tail(days)
+    consider_df = df.tail(weeks)
     ax.set_title("SPR Inventory")
     ax.plot(consider_df.index, consider_df['SPR'], color='blue', alpha=0.5)
     
@@ -113,9 +114,9 @@ def plot_spr_line(df, ax, days=104, references=dict()):
     if references:
         ax.legend()
 
-def plot_commercial_inventory_line(df, ax, days=104, references:dict[str, dt.timedelta]=dict()):
+def plot_commercial_inventory_line(df, ax, weeks=104, references:dict[str, dt.timedelta]=dict()):
     # Commercial Stock Level
-    consider_df = df.tail(days)
+    consider_df = df.tail(weeks)
     ax.set_title("Commercial Crude Inventory")
     ax.plot(consider_df.index, consider_df['Commercial Crude (Excluding SPR)'], color='blue', alpha=0.2)
     ax.plot(consider_df.index, consider_df['Commercial Crude (Excluding SPR)'].rolling(4).mean(),
@@ -131,9 +132,7 @@ def plot_commercial_inventory_line(df, ax, days=104, references:dict[str, dt.tim
                   label=label)
         i += 1
 
-    ylabels = [int(l) for l in np.linspace(consider_df['Commercial Crude (Excluding SPR)'].min(),
-                                           consider_df['Commercial Crude (Excluding SPR)'].max(),
-                                           5)]
+    ylabels = [ int(l) for l in np.linspace(consider_df['Commercial Crude (Excluding SPR)'].min(), consider_df['Commercial Crude (Excluding SPR)'].max(), 5) ]
     ax.yaxis.set_ticks(ylabels)
     ax.xaxis.set_major_locator(date_locator)
     ax.xaxis.set_major_formatter(mdate_fmt)
@@ -142,23 +141,27 @@ def plot_commercial_inventory_line(df, ax, days=104, references:dict[str, dt.tim
     
 def populate_dashboard(df, fig, axs):
 
-    oil_prices = get_oil_data()
+    price_lookback = 365 * 2
+    oil_prices = get_oil_data(days=price_lookback)
 
     gs = axs[0][0].get_gridspec()
     # remove the underlying axes
     for ax in axs[0, :]:
         ax.remove()
     axbig = fig.add_subplot(gs[0, :])
-    plot_oil_price(oil_prices, axbig)
     
-    plot_draw_build_bar(df, axs[1][0], days=24)
-    plot_draw_build_dist(df, axs[1][1], days=24)
+    plot_oil_price(oil_prices, axbig, days=price_lookback)
+    
+    plot_draw_build_bar(df, axs[1][0], weeks=52)
+    plot_draw_build_dist(df, axs[1][1], weeks=52)
 
-    reference_levels = {"1 year ago": dt.timedelta(weeks=52),
+    reference_levels = {"2 years ago": dt.timedelta(weeks=52*2),
+                        "1 year ago": dt.timedelta(weeks=52),
                         "6 months ago": dt.timedelta(weeks=26),
                         "4 weeks ago": dt.timedelta(weeks=4)}
-    plot_spr_line(df, axs[2][0], days=104, references=reference_levels)
-    plot_commercial_inventory_line(df, axs[2][1], days=104, references=reference_levels)
+    
+    plot_spr_line(df, axs[2][0], weeks=52*2, references=reference_levels)
+    plot_commercial_inventory_line(df, axs[2][1], weeks=52*2, references=reference_levels)
 
 
 app = Flask(__name__)
@@ -180,7 +183,7 @@ def dashboard():
     return f"<img src='data:image/png;base64,{data}'/>"
     
 if __name__ == "__main__":
-    app.run(host='0.0.0.0',port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
 
     
 
