@@ -50,6 +50,7 @@ def plot_oil_price(df, ax, days=365):
     ax.legend()
     ax.set_ylabel("Price per barrel ($)")
     ax.xaxis.set_major_formatter(mdate_fmt)
+    ax.grid()
 
 def plot_draw_build_bar(df, ax, weeks=24):
     # Draw/Build
@@ -65,6 +66,7 @@ def plot_draw_build_bar(df, ax, weeks=24):
     ax.set_ylabel("Change (Mb)")
     ax.xaxis.set_major_formatter(mdate_fmt)
     # ax.xaxis.set_major_locator(date_locator)
+    ax.grid()
 
 def plot_draw_build_dist(df, ax, weeks=24):
     # Boxplot of Draw/Build
@@ -88,6 +90,7 @@ def plot_draw_build_dist(df, ax, weeks=24):
     
     ax.xaxis.set_ticklabels([])
     ax.legend()
+    ax.grid()
 
 def plot_spr_line(df, ax, weeks=104, references=dict()):
     # SPR Level
@@ -113,6 +116,7 @@ def plot_spr_line(df, ax, weeks=104, references=dict()):
     ax.xaxis.set_major_formatter(mdate_fmt)
     if references:
         ax.legend()
+    ax.grid()
 
 def plot_commercial_inventory_line(df, ax, weeks=104, references:dict[str, dt.timedelta]=dict()):
     # Commercial Stock Level
@@ -120,7 +124,7 @@ def plot_commercial_inventory_line(df, ax, weeks=104, references:dict[str, dt.ti
     ax.set_title("Commercial Crude Inventory")
     ax.plot(consider_df.index, consider_df['Commercial Crude (Excluding SPR)'], color='blue', alpha=0.2)
     ax.plot(consider_df.index, consider_df['Commercial Crude (Excluding SPR)'].rolling(4).mean(),
-                   color='k', alpha=0.7, label="Rolling 4-week")
+                   color='k', alpha=0.7, label="SMA (4-weeks)")
     colors = plt.cm.rainbow(np.linspace(0, 1, len(references)))
     i = 0
     for label, lookback in references.items():
@@ -138,6 +142,7 @@ def plot_commercial_inventory_line(df, ax, weeks=104, references:dict[str, dt.ti
     ax.xaxis.set_major_formatter(mdate_fmt)
     if references:
         ax.legend()
+    ax.grid()
     
 def populate_dashboard(df, fig, axs):
 
@@ -152,8 +157,8 @@ def populate_dashboard(df, fig, axs):
     
     plot_oil_price(oil_prices, axbig, days=price_lookback)
     
-    plot_draw_build_bar(df, axs[1][0], weeks=52)
-    plot_draw_build_dist(df, axs[1][1], weeks=52)
+    plot_draw_build_bar(df, axs[1][0], weeks=24)
+    plot_draw_build_dist(df, axs[1][1], weeks=24)
 
     reference_levels = {"2 years ago": dt.timedelta(weeks=52*2),
                         "1 year ago": dt.timedelta(weeks=52),
@@ -162,6 +167,7 @@ def populate_dashboard(df, fig, axs):
     
     plot_spr_line(df, axs[2][0], weeks=52*2, references=reference_levels)
     plot_commercial_inventory_line(df, axs[2][1], weeks=52*2, references=reference_levels)
+    
 
 
 app = Flask(__name__)
