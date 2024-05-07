@@ -96,6 +96,9 @@ def build_figure(col: str = 'Commercial Crude (Excluding SPR)') -> go.Figure:
         autosize=True,
         height=850,
         showlegend=False,
+        yaxis_title="$/barrel",
+        yaxis2_title="Million Barrels",
+        yaxis3_title="Million Barrels",
         xaxis=dict(
             rangeselector=dict(
                 buttons=list([
@@ -162,11 +165,13 @@ def rescale_y_axis(figure, relay):
         # Feature Change Data
         i0 = np.searchsorted(figure['data'][1]['x'], x0)
         i1 = np.searchsorted(figure['data'][1]['x'], x1)
-        miny = min(figure['data'][1]['y'][i0:i1])
+        window_data = figure['data'][1]['y'][i0:i1]
+        miny = min(window_data) if window_data.size > 0 else 0
 
         i0 = np.searchsorted(figure['data'][2]['x'], x0)
         i1 = np.searchsorted(figure['data'][2]['x'], x1)
-        maxy = max(figure['data'][2]['y'][i0:i1])
+        window_data = figure['data'][2]['y'][i0:i1]
+        maxy = max(window_data) if window_data.size > 0 else 0
         new_layout['yaxis2']['range'] = [miny*0.98, maxy*1.01]
             
         # Feature Level Data
