@@ -1,5 +1,3 @@
-import base64
-from io import BytesIO
 
 import numpy as np
 import pandas as pd
@@ -7,189 +5,188 @@ import pandas as pd
 import pytz
 import datetime as dt
 
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from matplotlib.figure import Figure
-
 import yfinance as yf
 
-from flask import Flask
+from dash import Dash, dcc, html
+from dash.dependencies import Input, Output
 
-from async_scrape_eia import download_wpsr_since_date
-
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from plotly.basedatatypes import BaseTraceType
 
 wall_st = pytz.timezone("America/New_York")
-mdate_fmt = mdates.DateFormatter('%m/%y')
-date_locator = mdates.AutoDateLocator(minticks=4, maxticks=8)
 
-def load_inventory_data():
-    df = pd.read_csv('./reports.csv', index_col=0)
-    df.index = pd.to_datetime(df.index).tz_localize(wall_st)
-    df = df.sort_index()
+
+def format_inventory_data(df: pd.DataFrame) -> pd.DataFrame:
+    # Extract report date from endpoint url
+    df['Report Date'] = df['Endpoint'].str.extract(r'(\d{4}_\d{2}_\d{2})')
+    # Drop URL, Report Date
+    df = df.drop('Endpoint', axis=1)
+    df = df.reset_index(drop=True)
+    # Set report date as index, convert to DatetimeIndex
+    df = df.set_index('Report Date')
+    df.index = pd.to_datetime(df.index, format='%Y_%m_%d').tz_localize(wall_st)
     return df
 
-def add_inventory_features(df):
-    df['Commercial Crude (Excluding SPR)'] = df['Crude Oil'] - df['SPR']
-    df['Weekly Commercial Draw/Build'] = df['Commercial Crude (Excluding SPR)'].diff()
-    df['Weekly Commercial Draw/Build Rolling'] = df['Weekly Commercial Draw/Build'].rolling(4).sum()
-    return df
+# Inventory Data
+stock_summary = pd.read_csv("./reports.csv", index_col=0)
+inv = format_inventory_data(stock_summary)
+inv['Commercial Crude (Excluding SPR)'] = inv['Crude Oil'] - inv['SPR']
+inv['Weekly Commercial Draw/Build'] = inv['Commercial Crude (Excluding SPR)'].diff()
 
-def get_oil_data(days=365):
-    wti = yf.Ticker("CL=F")
-    years = int(np.ceil(days/365)) + 1
-    hist = wti.history(period=f"{years}y")
-    return hist
+# Market Data
+wti = yf.Ticker("CL=F")
+hist = wti.history(period="13y")
+oil_prices = hist.loc[inv.index.min():inv.index.max() + dt.timedelta(days=7)]
 
-def plot_oil_price(df, ax, days=365):
-    sma_freq = 20
-    consider_df = df.tail(days+sma_freq)
-
-    ax.set_title("WTI Oil Price")
-    ax.plot(consider_df.index[20:], consider_df['Close'].tail(days))
-    ax.plot(consider_df.index[20:], consider_df['Close'].rolling(sma_freq).mean().tail(days), label="SMA (20-day)")
-    ax.legend()
-    ax.set_ylabel("Price per barrel ($)")
-    ax.xaxis.set_major_formatter(mdate_fmt)
-    ax.grid()
-
-def plot_draw_build_bar(df, ax, weeks=24):
-    # Draw/Build
-    consider_df = df.tail(weeks)
-    builds = consider_df[consider_df['Weekly Commercial Draw/Build']>=0]
-    draws = consider_df[consider_df['Weekly Commercial Draw/Build']<0]
+def build_market_trace(df: pd.DataFrame) -> list[BaseTraceType]:
     
-    ax.set_title("Commercial Inventory Weekly Change")
-    ax.bar(builds.index, builds['Weekly Commercial Draw/Build'], color='red', width=1.5, alpha=0.5, label="Build")
-    ax.bar(draws.index, draws['Weekly Commercial Draw/Build'], color='green', width=1.5, alpha=0.5, label="Draw")
-    # ax.plot(consider_df.index, consider_df['Weekly Commercial Draw/Build Rolling'], color='black', alpha=0.5)
-    ax.legend()
-    ax.set_ylabel("Change (Mb)")
-    ax.xaxis.set_major_formatter(mdate_fmt)
-    # ax.xaxis.set_major_locator(date_locator)
-    ax.grid()
+    trace = go.Candlestick(x=df.index,
+                            open=df['Open'],
+                            high=df['High'],
+                            low=df['Low'],
+                            close=df['Close'],
+                          name='WTI Spot Price')
+    return [trace]
 
-def plot_draw_build_dist(df, ax, weeks=24):
-    # Boxplot of Draw/Build
-    consider_df = df.tail(weeks)
-    last_stock_change = consider_df['Weekly Commercial Draw/Build'].iloc[-1]
+
+def build_stock_bar_trace(df: pd.DataFrame) -> list[BaseTraceType]:
+    ## add the bars one at a time
+    traces = []
+
+    inv = df['Weekly Commercial Draw/Build'].dropna().copy().to_frame('Change')
+    inv['Draw/Build'] = np.where(inv['Change'] >= 0, "Build", "Draw")
     
-    ax.set_title("Commercial Inventory Change Distribution")
-    ax.boxplot(consider_df['Weekly Commercial Draw/Build'].iloc[:-1],
-                      patch_artist=True,
-                      boxprops=dict(facecolor='lightblue'),
-                      flierprops=dict(marker = "s", markerfacecolor = "red"))
-
-    if last_stock_change > 0:
-        color = 'red'
-    else:
-        color = 'green'
-    ax.hlines(last_stock_change, 
-                     xmin=0.5, xmax=1.5, 
-                     color=color, alpha=0.5, 
-                     label="Last Reported Change") 
+    color_map = {"Build": 'red', "Draw": 'green'}
     
-    ax.xaxis.set_ticklabels([])
-    ax.legend()
-    ax.grid()
+    for change in ['Draw', 'Build']:
+        sub_df = inv[inv['Draw/Build'] == change]
+        trace = go.Bar(x=sub_df.index, 
+                       y=sub_df['Change'],
+                       width=5.184e8, # 6 days in milliseconds
+                       name=change,
+                       marker_color=color_map[change],
+                       opacity=0.6)
+        traces.append(trace)
+    return traces
 
-def plot_spr_line(df, ax, weeks=104, references=dict()):
-    # SPR Level
-    consider_df = df.tail(weeks)
-    ax.set_title("SPR Inventory")
-    ax.plot(consider_df.index, consider_df['SPR'], color='blue', alpha=0.5)
-    
-    colors = plt.cm.rainbow(np.linspace(0, 1, len(references)))
-    i = 0
-    for label, lookback in references.items():
-        less_df = df.loc[:(df.index.max()-lookback)].iloc[-1]
-        ax.hlines(y=less_df['SPR'],
-                  xmin=consider_df.index.min(),
-                  xmax=consider_df.index.max(),
-                  linewidth=2, alpha=0.3, color=colors[i],
-                  label=label)
-        i += 1
+def build_crude_line_trace(df: pd.DataFrame) -> list[BaseTraceType]:
+    trace = go.Scatter(x=df.index,
+                       y=df['Commercial Crude (Excluding SPR)'],
+                       name='Commercial Crude Inventory',
+                      fill='tozeroy')
+    return [trace]
 
-    ylabels = [ int(l) for l in np.linspace(consider_df['SPR'].min(), consider_df['SPR'].max(), 5) ]
-    ax.yaxis.set_ticks(ylabels)
-    ax.set_ylabel("Total (Mb)")
-    ax.xaxis.set_major_locator(date_locator)
-    ax.xaxis.set_major_formatter(mdate_fmt)
-    if references:
-        ax.legend()
-    ax.grid()
-
-def plot_commercial_inventory_line(df, ax, weeks=104, references:dict[str, dt.timedelta]=dict()):
-    # Commercial Stock Level
-    consider_df = df.tail(weeks)
-    ax.set_title("Commercial Crude Inventory")
-    ax.plot(consider_df.index, consider_df['Commercial Crude (Excluding SPR)'], color='blue', alpha=0.2)
-    ax.plot(consider_df.index, consider_df['Commercial Crude (Excluding SPR)'].rolling(4).mean(),
-                   color='k', alpha=0.7, label="SMA (4-weeks)")
-    colors = plt.cm.rainbow(np.linspace(0, 1, len(references)))
-    i = 0
-    for label, lookback in references.items():
-        less_df = df.loc[:(df.index.max()-lookback)].iloc[-1]
-        ax.hlines(y=less_df['Commercial Crude (Excluding SPR)'],
-                  xmin=consider_df.index.min(),
-                  xmax=consider_df.index.max(),
-                  linewidth=2, alpha=0.3, color=colors[i],
-                  label=label)
-        i += 1
-
-    ylabels = [ int(l) for l in np.linspace(consider_df['Commercial Crude (Excluding SPR)'].min(), consider_df['Commercial Crude (Excluding SPR)'].max(), 5) ]
-    ax.yaxis.set_ticks(ylabels)
-    ax.xaxis.set_major_locator(date_locator)
-    ax.xaxis.set_major_formatter(mdate_fmt)
-    if references:
-        ax.legend()
-    ax.grid()
-    
-def populate_dashboard(df, fig, axs):
-
-    price_lookback = 365 * 2
-    oil_prices = get_oil_data(days=price_lookback)
-
-    gs = axs[0][0].get_gridspec()
-    # remove the underlying axes
-    for ax in axs[0, :]:
-        ax.remove()
-    axbig = fig.add_subplot(gs[0, :])
-    
-    plot_oil_price(oil_prices, axbig, days=price_lookback)
-    
-    plot_draw_build_bar(df, axs[1][0], weeks=24)
-    plot_draw_build_dist(df, axs[1][1], weeks=24)
-
-    reference_levels = {"2 years ago": dt.timedelta(weeks=52*2),
-                        "1 year ago": dt.timedelta(weeks=52),
-                        "6 months ago": dt.timedelta(weeks=26),
-                        "4 weeks ago": dt.timedelta(weeks=4)}
-    
-    plot_spr_line(df, axs[2][0], weeks=52*2, references=reference_levels)
-    plot_commercial_inventory_line(df, axs[2][1], weeks=52*2, references=reference_levels)
-    
+def build_spr_line_trace(df: pd.DataFrame) -> list[BaseTraceType]:
+    trace = go.Scatter(x=df.index,
+                       y=df['SPR'],
+                      mode='lines',
+                      name='SPR',
+                      fill='tozeroy')
+    return [trace]
 
 
-app = Flask(__name__)
+fig = make_subplots(rows=4, 
+                    cols=1, 
+                    shared_xaxes=True,
+                    subplot_titles=("WTI Spot Price", "Commercial Stock Change",
+                                    "Commercial Stock Level", "SPR Stock Level"),
+                    vertical_spacing=0.05) 
 
-@app.route("/")
-def dashboard():
-    
-    inventory_df = add_inventory_features(load_inventory_data())
+fig.add_traces(build_market_trace(oil_prices), rows=1, cols=1)
+fig.add_traces(build_stock_bar_trace(inv), rows=2, cols=1)
+# fig.add_traces(build_stock_box_trace(inv), rows=2, cols=1)
+fig.add_traces(build_crude_line_trace(inv), rows=3, cols=1)
+fig.add_traces(build_spr_line_trace(inv), rows=4, cols=1)
 
-    fig = Figure(figsize=(14, 10))
-    axs = fig.subplots(nrows=3, ncols=2)
-    populate_dashboard(inventory_df, fig, axs)
-    fig.tight_layout()
-    # Save it to a temporary buffer.
-    buf = BytesIO()
-    fig.savefig(buf, format="png")
-    # Embed the result in the html output.
-    data = base64.b64encode(buf.getbuffer()).decode("ascii")
-    return f"<img src='data:image/png;base64,{data}'/>"
-    
+fig.update_layout(
+    title_text="EIA US Crude Inventory Dashboard",
+    # autosize=True,
+    height=2000,
+    xaxis=dict(
+        # rangeselector=dict(
+        #     buttons=list([
+        #         dict(count=1,
+        #              label="1m",
+        #              step="month",
+        #              stepmode="backward"),
+        #         dict(count=6,
+        #              label="6m",
+        #              step="month",
+        #              stepmode="backward"),
+        #         dict(count=1,
+        #              label="YTD",
+        #              step="year",
+        #              stepmode="todate"),
+        #         dict(count=1,
+        #              label="1y",
+        #              step="year",
+        #              stepmode="backward"),
+        #         dict(step="all")
+        #     ])
+        # ),
+        rangeslider=dict(
+            visible=False
+        ),
+        type="date"
+    )
+)
+
+
+app = Dash()
+app.layout = html.Div([
+    dcc.Graph(figure=fig, id="fig")
+])
+
+@app.callback(
+    Output("fig", "figure"),
+    Input("fig", "relayoutData"),
+)
+def scaleYaxis(rng):
+
+    if rng and "xaxis4.range[0]" in rng.keys():
+
+        try:
+            x0 = dt.datetime.strptime(rng["xaxis.range[0]"][:10], '%Y-%m-%d')
+            x1 = dt.datetime.strptime(rng["xaxis.range[1]"][:10], '%Y-%m-%d')
+            x0 = wall_st.localize(x0)
+            x1 = wall_st.localize(x1)
+
+            # Price Data
+            miny = oil_prices.loc[x0:x1, 'Low'].min()
+            maxy = oil_prices.loc[x0:x1, 'High'].max()
+            fig['layout']['yaxis']['range'] = [miny, maxy]
+
+            # Crude Change Data
+            miny = inv.loc[x0:x1, 'Weekly Commercial Draw/Build'].min()
+            maxy = inv.loc[x0:x1, 'Weekly Commercial Draw/Build'].max()
+            fig['layout']['yaxis2']['range'] = [miny, maxy]
+            
+            # Crude Inventory Data
+            miny = inv.loc[x0:x1, 'Commercial Crude (Excluding SPR)'].min()
+            maxy = inv.loc[x0:x1, 'Commercial Crude (Excluding SPR)'].max()
+            fig['layout']['yaxis3']['range'] = [miny, maxy]
+
+            # SPR Inventory Data
+            miny = inv.loc[x0:x1, 'SPR'].min()
+            maxy = inv.loc[x0:x1, 'SPR'].max()
+            fig['layout']['yaxis4']['range'] = [miny, maxy]
+            
+        except KeyError as e:
+            print(e)
+            pass
+
+            
+        finally:
+            
+            fig["layout"]["xaxis4"]["range"] = [rng["xaxis4.range[0]"], rng["xaxis4.range[1]"]]
+
+    return fig
+
+
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run_server(debug=True)
+
 
     
 
