@@ -15,6 +15,15 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from plotly.basedatatypes import BaseTraceType
 
+import logging
+
+
+logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S',
+                    level=logging.INFO)
+
+logger = logging.getLogger(__name__)
+
 wall_st = pytz.timezone("America/New_York")
 
 
@@ -31,12 +40,14 @@ def format_inventory_data(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # Inventory Data
+logger.info("Loading WPSR data...")
 stock_summary = pd.read_csv("./reports.csv", index_col=0)
 inv = format_inventory_data(stock_summary)
 inv['Commercial Crude (Excluding SPR)'] = inv['Crude Oil'] - inv['SPR']
 
 
 # Market Data
+logger.info("Fetching WTI price data...")
 wti = yf.Ticker("CL=F")
 hist = wti.history(period="13y")
 oil_prices = hist.loc[inv.index.min():inv.index.max() + dt.timedelta(days=7)]
@@ -190,6 +201,7 @@ def rescale_y_axis(figure, relay):
     return figure
 
 
+logger.info("Building dashboard...")
 app = Dash()
 
 app.layout = html.Div([

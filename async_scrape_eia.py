@@ -1,8 +1,10 @@
 import io
 import os
 import re
+
 import pandas as pd
 import datetime as dt
+from time import perf_counter
 
 import asyncio
 import aiohttp
@@ -11,8 +13,14 @@ from urllib.parse import urljoin
 
 from typing import Optional
 
-from time import perf_counter
+import logging
 
+
+logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S',
+                    level=logging.INFO)
+
+logger = logging.getLogger(__name__)
 
 EIA_BASE_URL = 'https://www.eia.gov'
 EIA_ARCHIVE_URI = '/petroleum/supply/weekly/archive/'
@@ -110,7 +118,7 @@ async def download_many_tables(urls, concur_req):
                 this_df['Endpoint'] = [this_url]
 
             except KeyError:  # invalid table format
-                print(f'Failed to extract table from {this_url}')
+                logger.warning(f'Failed to extract table from {this_url}')
                 pass
 
             else:  # merge dataframes
@@ -153,7 +161,7 @@ def save_inventory_table_to_file(df, cache_file: Optional[str] = None):
     if cache_file is None:
         cache_file = 'reports.csv'
 
-    df.to_csv(cache_file)
+    df.sort_index().to_csv(cache_file)
 
 
 def download_eia_reports(urls, concur_req: int = 10):
@@ -169,7 +177,7 @@ def download_eia_reports(urls, concur_req: int = 10):
 def load_cached_reports(cache_file: str) -> pd.DataFrame:
     # check valid path here
     if os.path.isfile(cache_file):
-        print('Cache found')
+        logger.info('Cache found')
         df = pd.read_csv(cache_file, index_col=0)
         df.index = pd.to_datetime(df.index)
     else:
@@ -188,7 +196,7 @@ def add_latest_report_if_new(old_df: pd.DataFrame) -> pd.DataFrame:
         df = (latest_df.copy() if old_df.empty
               else pd.concat([old_df, latest_df], axis=0))
     else:
-        print('Latest release already cached')
+        logger.info('Latest release already cached')
         df = old_df
 
     return df
@@ -233,8 +241,8 @@ if __name__ == '__main__':
 
     df = download_wpsr_since_date(cutoff, cache_file=cache_file)
 
-    print('Finished scraping EIA WPSRs')
-    print(f'{len(df)} reports found')
     seconds = perf_counter() - start_t
-    print(f'That took {seconds//60:.0f}mins, {seconds%60:.2f}seconds',
-          flush=True)
+
+    logger.info('Finished scraping EIA WPSRs')
+    logger.info(f'{len(df)} reports found')
+    logger.info(f'That took {seconds//60:.0f}mins, {seconds%60:.2f}seconds')
