@@ -5,7 +5,7 @@
 
 ## Instructions
 ### Clone the repository
-<code>git clone https://github.com/kinghfs/eia-webapp-docker</code>
+<code>git clone https://github.com/kinghfs/eia-webapp-docker.git</code>
 
 ### Using Docker
 #### Build the Docker image
