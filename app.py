@@ -117,7 +117,7 @@ def build_figure(col: str = 'Commercial Crude (Excluding SPR)') -> go.Figure:
 
     fig.update_layout(
         autosize=True,
-        height=850,
+        height=900,
         showlegend=False,
         yaxis_title="$/barrel",
         yaxis2_title="Million Barrels",
