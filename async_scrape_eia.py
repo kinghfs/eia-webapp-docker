@@ -41,6 +41,38 @@ PETROLEUM_STOCK_INDEX_TOP_LEVEL = [
 ]
 
 
+def extract_archive_uris(string: str) -> list[str]:
+    '''Extracts valid archive endpoints with REGEX
+    '''
+    report_pattern = re.compile(
+        '(/petroleum/supply/weekly/archive/[0-9]{4}/'
+        '[0-9]{4}_[0-9]{1,2}_[0-9]{1,2}(?:_data)?)'
+        )
+
+    matches = report_pattern.findall(string)
+
+    return matches
+
+
+def filter_uris_by_date(uris: list[str], date: dt.datetime) -> list[str]:
+    '''Filter archive urls by date
+    '''
+    recent_uris = []
+
+    for uri in uris:
+
+        report_date = dt.datetime.strptime(
+            uri.split('/')[-1].replace('_data', ''),
+            '%Y_%m_%d'
+            )
+
+        if report_date >= date:
+
+            recent_uris.append(uri)
+
+    return recent_uris
+
+
 def get_report_urls(earliest: Optional[dt.datetime] = None) -> list[str]:
     '''Generate EIA archive URLs for WPSRs
     '''
@@ -55,29 +87,10 @@ def get_report_urls(earliest: Optional[dt.datetime] = None) -> list[str]:
 
     contents = resp.content.decode(encoding='cp1252')
 
-    report_pattern = re.compile(
-        '(/petroleum/supply/weekly/archive/[0-9]{4}/'
-        '[0-9]{4}_[0-9]{1,2}_[0-9]{1,2}(?:_data)?)'
-        )
-
-    report_uris = report_pattern.findall(contents)
+    report_uris = extract_archive_uris(contents)
 
     if isinstance(earliest, dt.datetime):
-
-        recent_reports = []
-
-        for uri in report_uris:
-
-            report_date = dt.datetime.strptime(
-                uri.split('/')[-1].replace('_data', ''),
-                '%Y_%m_%d'
-                )
-
-            if report_date >= earliest:
-
-                recent_reports.append(uri)
-
-        report_uris = recent_reports
+        report_uris = filter_uris_by_date(report_uris, earliest)
 
     urls = [urljoin(EIA_BASE_URL, uri) + EIA_REPORT_TABLE_URI
             for uri in report_uris]
@@ -125,8 +138,6 @@ async def download_many_tables(urls, concur_req):
                 df = (this_df.copy() if df.empty
                       else pd.concat([df, this_df], axis=0))
 
-        df.index = pd.to_datetime(df.index, format='%m/%d/%y')
-
         return df
 
 
@@ -134,6 +145,10 @@ def format_report_table(df: pd.DataFrame) -> dict:
     """Extracts the top level stock inventories from
      a Petroleum Stocks DataFrame
     """
+    # Handle Empty Case
+    if df.empty:
+        return pd.DataFrame(columns=PETROLEUM_STOCK_INDEX_TOP_LEVEL + ['SPR'])
+    
     # Remove second-level stock rows
     summary_df = df[df['STUB_1'].isin(PETROLEUM_STOCK_INDEX_TOP_LEVEL)]
 
@@ -147,6 +162,9 @@ def format_report_table(df: pd.DataFrame) -> dict:
 
     # Reformat as df row
     stock_df = stock_s.to_frame().T
+
+    # Convert index to DatetimeIndex
+    stock_df.index = pd.to_datetime(stock_df.index, format='%m/%d/%y')
 
     # Add SPR column
     stock_df['SPR'] = (stock_df['Total Stocks (Including SPR)']
@@ -181,7 +199,7 @@ def load_cached_reports(cache_file: str) -> pd.DataFrame:
         df = pd.read_csv(cache_file, index_col=0)
         df.index = pd.to_datetime(df.index)
     else:
-        df = pd.DataFrame()
+        df = pd.DataFrame(columns=PETROLEUM_STOCK_INDEX_TOP_LEVEL + ['SPR'])
 
     return df
 
