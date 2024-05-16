@@ -26,4 +26,4 @@ Run <code>pip install -r requirements.txt</code> in the command line to install 
 Run <code>python3 async_scrape_eia.py</code>
 
 #### View dashboard in browser
-Run <code>python3 app.py</code>, browse to localhost:5000 to view dashboard.
+Run <code>python3 app.py</code>, browse to localhost:8050 to view dashboard.
