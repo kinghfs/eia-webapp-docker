@@ -126,7 +126,6 @@ def build_model_trace(df: pd.DataFrame) -> list[BaseTraceType]:
     years_ago = (today - df.index).days // days_per_year
     inflation_adjs = (1 + av_cpi) ** years_ago.to_numpy()
     true_y = y / inflation_adjs
-    print(true_y[-3:])
     
     trace = go.Scatter(x=list(df.index) + [last_price_date],
                     y=list(true_y) + [true_y[-1]],
@@ -205,8 +204,6 @@ def rescale_y_axis(figure, relay):
         x1 = dt.datetime.strptime(relay["xaxis.range[1]"][:10], '%Y-%m-%d')
         x0 = wall_st.localize(x0)
         x1 = wall_st.localize(x1)
-
-        print(figure['data'])
 
         # Price Data
         i0 = np.searchsorted(figure['data'][0]['x'], x0)
