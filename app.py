@@ -1,4 +1,5 @@
 import copy
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -14,6 +15,8 @@ from dash.dependencies import Input, Output, State
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from plotly.basedatatypes import BaseTraceType
+
+from xgboost import XGBRegressor
 
 import logging
 
@@ -43,7 +46,7 @@ def format_inventory_data(df: pd.DataFrame) -> pd.DataFrame:
 logger.info("Loading WPSR data...")
 stock_summary = pd.read_csv("./reports.csv", index_col=0)
 inv = format_inventory_data(stock_summary)
-inv['Commercial Crude (Excluding SPR)'] = inv['Crude Oil'] - inv['SPR']
+inv['Commercial Crude'] = inv['Crude Oil'] - inv['SPR']
 
 
 # Market Data
@@ -51,6 +54,14 @@ logger.info("Fetching WTI price data...")
 wti = yf.Ticker("CL=F")
 hist = wti.history(period="13y")
 oil_prices = hist.loc[inv.index.min():inv.index.max() + dt.timedelta(days=7)]
+
+
+# XGBoost Model
+with open('xgb_model.pkl', 'rb') as f:
+    model: XGBRegressor = pickle.load(f)
+model_features = ['Total Motor Gasoline', 'Fuel Ethanol', 'Kerosene-Type Jet Fuel',
+                  'Distillate Fuel Oil', 'Residual Fuel Oil', 'Propane/Propylene',
+                  'Other Oils', 'Unfinished Oils', 'Commercial Crude']
 
 
 # Graph object functions
@@ -90,7 +101,7 @@ def build_bar_trace(df: pd.DataFrame,
 
 
 def build_line_trace(df: pd.DataFrame,
-                     col: str = 'Commercial Crude (Excluding SPR)'
+                     col: str = 'Commercial Crude'
                      ) -> list[BaseTraceType]:
 
     trace = go.Scatter(x=df.index,
@@ -102,7 +113,31 @@ def build_line_trace(df: pd.DataFrame,
     return [trace]
 
 
-def build_figure(col: str = 'Commercial Crude (Excluding SPR)') -> go.Figure:
+def build_model_trace(df: pd.DataFrame) -> list[BaseTraceType]:
+    last_price_date = oil_prices.index[-1]
+    
+    lookback = 4
+    X = df[model_features].rolling(lookback).mean().to_numpy()
+    y = model.predict(X)
+
+    av_cpi = 0.0274
+    days_per_year = 365.2425
+    today = dt.datetime.now(tz=wall_st)
+    years_ago = (today - df.index).days // days_per_year
+    inflation_adjs = (1 + av_cpi) ** years_ago.to_numpy()
+    true_y = y / inflation_adjs
+    print(true_y[-3:])
+    
+    trace = go.Scatter(x=list(df.index) + [last_price_date],
+                    y=list(true_y) + [true_y[-1]],
+                    mode='lines',
+                    line_shape='hv',
+                    name='XGB Prediction')
+
+    return [trace]
+
+
+def build_figure(col: str = 'Commercial Crude') -> go.Figure:
 
     fig = make_subplots(rows=3,
                         cols=1,
@@ -112,6 +147,7 @@ def build_figure(col: str = 'Commercial Crude (Excluding SPR)') -> go.Figure:
                         vertical_spacing=0.05)
 
     fig.add_traces(build_market_trace(oil_prices), rows=1, cols=1)
+    fig.add_traces(build_model_trace(inv), rows=1, cols=1)
     fig.add_traces(build_bar_trace(inv, col), rows=2, cols=1)
     fig.add_traces(build_line_trace(inv, col), rows=3, cols=1)
 
@@ -170,6 +206,8 @@ def rescale_y_axis(figure, relay):
         x0 = wall_st.localize(x0)
         x1 = wall_st.localize(x1)
 
+        print(figure['data'])
+
         # Price Data
         i0 = np.searchsorted(figure['data'][0]['x'], x0)
         i1 = np.searchsorted(figure['data'][0]['x'], x1)
@@ -178,22 +216,22 @@ def rescale_y_axis(figure, relay):
         new_layout['yaxis']['range'] = [miny*0.98, maxy*1.01]
 
         # Feature Change Data
-        i0 = np.searchsorted(figure['data'][1]['x'], x0)
-        i1 = np.searchsorted(figure['data'][1]['x'], x1)
-        window_data = figure['data'][1]['y'][i0:i1]
-        miny = min(window_data) if window_data.size > 0 else 0
-
         i0 = np.searchsorted(figure['data'][2]['x'], x0)
         i1 = np.searchsorted(figure['data'][2]['x'], x1)
         window_data = figure['data'][2]['y'][i0:i1]
+        miny = min(window_data) if window_data.size > 0 else 0
+
+        i0 = np.searchsorted(figure['data'][3]['x'], x0)
+        i1 = np.searchsorted(figure['data'][3]['x'], x1)
+        window_data = figure['data'][3]['y'][i0:i1]
         maxy = max(window_data) if window_data.size > 0 else 0
         new_layout['yaxis2']['range'] = [miny*0.98, maxy*1.01]
 
         # Feature Level Data
-        i0 = np.searchsorted(figure['data'][3]['x'], x0)
-        i1 = np.searchsorted(figure['data'][3]['x'], x1)
-        miny = min(figure['data'][3]['y'][i0:i1])
-        maxy = max(figure['data'][3]['y'][i0:i1])
+        i0 = np.searchsorted(figure['data'][4]['x'], x0)
+        i1 = np.searchsorted(figure['data'][4]['x'], x1)
+        miny = min(figure['data'][4]['y'][i0:i1])
+        maxy = max(figure['data'][4]['y'][i0:i1])
         new_layout['yaxis3']['range'] = [miny*0.98, maxy*1.01]
 
     figure['layout'] = new_layout
@@ -207,7 +245,7 @@ app = Dash()
 app.layout = html.Div([
     html.H1(children='EIA Weekly Petroleum Status Report Dashboard',
             style={'textAlign': 'center', 'fontFamily': 'sans-serif'}),
-    dcc.Dropdown(inv.columns, 'Commercial Crude (Excluding SPR)',
+    dcc.Dropdown(inv.columns, 'Commercial Crude',
                  id='Dropdown', style={'fontFamily': 'sans-serif'}),
     dcc.Graph(figure=build_figure(), id="Graph")
 ])
