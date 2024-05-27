@@ -1,5 +1,6 @@
 import copy
 import pickle
+import logging
 
 import numpy as np
 import pandas as pd
@@ -16,19 +17,32 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from plotly.basedatatypes import BaseTraceType
 
-from xgboost import XGBRegressor
-
-import logging
+from sklearn.pipeline import Pipeline
 
 
+# Configurations
 logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S',
                     level=logging.INFO)
 
 logger = logging.getLogger(__name__)
 
-wall_st = pytz.timezone("America/New_York")
+external_stylesheets = [
+    {
+        'href': (
+            'https://fonts.googleapis.com/css2?'
+            'family=Lato:wght@400;700&display=swap'
+        ),
+        'rel': 'stylesheet',
+    },
+]
 
+wall_st = pytz.timezone('America/New_York')
+
+
+# Inventory Data
+logger.info("Loading WPSR data...")
+stock_summary = pd.read_csv("./reports.csv", index_col=0)
 
 def format_inventory_data(df: pd.DataFrame) -> pd.DataFrame:
     # Extract report date from endpoint url
@@ -39,29 +53,29 @@ def format_inventory_data(df: pd.DataFrame) -> pd.DataFrame:
     # Set report date as index, convert to DatetimeIndex
     df = df.set_index('Report Date')
     df.index = pd.to_datetime(df.index, format='%Y_%m_%d').tz_localize(wall_st)
+    # Extract commercial inventory from total crude and SPR
+    df['Commercial Crude'] = df['Crude Oil'] - df['SPR']
     return df
 
-
-# Inventory Data
-logger.info("Loading WPSR data...")
-stock_summary = pd.read_csv("./reports.csv", index_col=0)
 inv = format_inventory_data(stock_summary)
-inv['Commercial Crude'] = inv['Crude Oil'] - inv['SPR']
 
 
 # Market Data
-logger.info("Fetching WTI price data...")
-wti = yf.Ticker("CL=F")
-hist = wti.history(period="13y")
-oil_prices = hist.loc[inv.index.min():inv.index.max() + dt.timedelta(days=7)]
+logger.info('Fetching WTI price data...')
+wti = yf.Ticker('CL=F')
+hist = wti.history(period='13y')
+oil_prices = hist.loc[inv.index.min()
+                      :inv.index.max() + dt.timedelta(days=7)]
 
 
 # XGBoost Model
-with open('xgb_model.pkl', 'rb') as f:
-    model: XGBRegressor = pickle.load(f)
-model_features = ['Total Motor Gasoline', 'Fuel Ethanol', 'Kerosene-Type Jet Fuel',
-                  'Distillate Fuel Oil', 'Residual Fuel Oil', 'Propane/Propylene',
-                  'Other Oils', 'Unfinished Oils', 'Commercial Crude']
+with open('ridge_model.pkl', 'rb') as f:
+    model: Pipeline = pickle.load(f)
+
+model_features = ['Total Motor Gasoline', 'Fuel Ethanol',
+                  'Kerosene-Type Jet Fuel', 'Distillate Fuel Oil',
+                  'Residual Fuel Oil', 'Propane/Propylene', 'Other Oils',
+                  'Unfinished Oils', 'Commercial Crude']
 
 
 # Graph object functions
@@ -84,7 +98,7 @@ def build_bar_trace(df: pd.DataFrame,
     deltas = df[col].diff().dropna().copy().to_frame('Change')
     deltas['Draw/Build'] = np.where(deltas['Change'] >= 0, "Build", "Draw")
 
-    color_map = {"Build": 'red', "Draw": 'green'}
+    color_map = {'Build': 'red', 'Draw': 'green'}
 
     for change in ['Draw', 'Build']:
         sub_df = deltas[deltas['Draw/Build'] == change]
@@ -115,9 +129,8 @@ def build_line_trace(df: pd.DataFrame,
 
 def build_model_trace(df: pd.DataFrame) -> list[BaseTraceType]:
     last_price_date = oil_prices.index[-1]
-    
-    lookback = 4
-    X = df[model_features].rolling(lookback).mean().to_numpy()
+
+    X = df[model_features].to_numpy()
     y = model.predict(X)
 
     av_cpi = 0.0274
@@ -126,12 +139,12 @@ def build_model_trace(df: pd.DataFrame) -> list[BaseTraceType]:
     years_ago = (today - df.index).days // days_per_year
     inflation_adjs = (1 + av_cpi) ** years_ago.to_numpy()
     true_y = y / inflation_adjs
-    
-    trace = go.Scatter(x=list(df.index) + [last_price_date],
-                    y=list(true_y) + [true_y[-1]],
-                    mode='lines',
-                    line_shape='hv',
-                    name='XGB Prediction')
+
+    trace = go.Scatter(x=np.append(np.array(df.index), last_price_date),
+                       y=np.append(true_y, true_y[-1]),
+                       mode='lines',
+                       line_shape='hv',
+                       name='Model Prediction')
 
     return [trace]
 
@@ -141,8 +154,8 @@ def build_figure(col: str = 'Commercial Crude') -> go.Figure:
     fig = make_subplots(rows=3,
                         cols=1,
                         shared_xaxes=True,
-                        subplot_titles=("WTI Spot Price", f"{col} Change",
-                                        f"{col} Level"),
+                        subplot_titles=('WTI Spot Price', f'{col} Change',
+                                        f'{col} Level'),
                         vertical_spacing=0.05)
 
     fig.add_traces(build_market_trace(oil_prices), rows=1, cols=1)
@@ -152,31 +165,31 @@ def build_figure(col: str = 'Commercial Crude') -> go.Figure:
 
     fig.update_layout(
         autosize=True,
-        height=900,
+        height=1200,
         showlegend=False,
-        yaxis_title="$/barrel",
-        yaxis2_title="Million Barrels",
-        yaxis3_title="Million Barrels",
+        yaxis_title='$/barrel',
+        yaxis2_title='Million Barrels',
+        yaxis3_title='Million Barrels',
         xaxis=dict(
             rangeselector=dict(
                 buttons=list([
                     dict(count=1,
-                         label="1m",
-                         step="month",
-                         stepmode="backward"),
+                         label='1m',
+                         step='month',
+                         stepmode='backward'),
                     dict(count=6,
-                         label="6m",
-                         step="month",
-                         stepmode="backward"),
+                         label='6m',
+                         step='month',
+                         stepmode='backward'),
                     dict(count=1,
-                         label="YTD",
-                         step="year",
-                         stepmode="todate"),
+                         label='YTD',
+                         step='year',
+                         stepmode='todate'),
                     dict(count=1,
-                         label="1y",
-                         step="year",
-                         stepmode="backward"),
-                    dict(step="all")
+                         label='1y',
+                         step='year',
+                         stepmode='backward'),
+                    dict(step='all')
                 ])
             ),
             rangeslider=dict(
@@ -189,62 +202,95 @@ def build_figure(col: str = 'Commercial Crude') -> go.Figure:
     return fig
 
 
+def get_window_y_range(x: np.array, y: np.array,
+                       x0: dt.datetime, x1: dt.datetime,
+                       cushion: float = 0.05) -> tuple[float, float]:
+    '''Get trace y-range for xaxis range (x0, x1) with cushioning
+    '''
+    # Find closest index
+    first_index = np.searchsorted(x, x0)
+    last_index = np.searchsorted(x, x1)
+    # Filter y values
+    filtered_y = y[first_index:last_index]
+    # Empty edge case
+    if filtered_y.size == 0:
+        return 0, 0
+    # Limit values
+    min_y = min(filtered_y)
+    max_y = max(filtered_y)
+    # Buffer size
+    buffer = (max_y - min_y) * cushion
+    return min_y - buffer, max_y + buffer
+
+
 def rescale_y_axis(figure, relay):
-    """
-    """
+    '''Updates yaxis ranges in figure layout according to xaxis relayout
+    '''
+    expected = {'xaxis.range[0]', 'xaxis.range[1]'}
 
-    new_layout = copy.deepcopy(figure['layout'])
+    if expected.issubset(relay.keys()):
 
-    if "xaxis.range[0]" in relay:
+        new_layout = copy.deepcopy(figure['layout'])
 
-        new_layout['xaxis3']['range'] = [relay['xaxis.range[0]'],
-                                         relay['xaxis.range[1]']]
+        new_x_range = [relay['xaxis.range[0]'],
+                       relay['xaxis.range[1]']]
 
-        x0 = dt.datetime.strptime(relay["xaxis.range[0]"][:10], '%Y-%m-%d')
-        x1 = dt.datetime.strptime(relay["xaxis.range[1]"][:10], '%Y-%m-%d')
+        # Extract xaxis datetime limits
+        x0 = dt.datetime.strptime(new_x_range[0][:10], '%Y-%m-%d')
+        x1 = dt.datetime.strptime(new_x_range[1][:10], '%Y-%m-%d')
+        # Localise datetimes to EST
         x0 = wall_st.localize(x0)
         x1 = wall_st.localize(x1)
 
-        # Price Data
-        i0 = np.searchsorted(figure['data'][0]['x'], x0)
-        i1 = np.searchsorted(figure['data'][0]['x'], x1)
-        miny = min(figure['data'][0]['y'][i0:i1])
-        maxy = max(figure['data'][0]['y'][i0:i1])
-        new_layout['yaxis']['range'] = [miny*0.98, maxy*1.01]
+        updated_axis = set()
 
-        # Feature Change Data
-        i0 = np.searchsorted(figure['data'][2]['x'], x0)
-        i1 = np.searchsorted(figure['data'][2]['x'], x1)
-        window_data = figure['data'][2]['y'][i0:i1]
-        miny = min(window_data) if window_data.size > 0 else 0
+        for trace in figure['data']:
+            # Convert axis anchors to layout keys
+            xaxis = trace['xaxis'].replace('x', 'xaxis')
+            yaxis = trace['yaxis'].replace('y', 'yaxis')
+            # Trace data
+            x = trace['x']
+            y = trace['y']
+            # New y range
+            this_y_range = get_window_y_range(x, y, x0, x1)
 
-        i0 = np.searchsorted(figure['data'][3]['x'], x0)
-        i1 = np.searchsorted(figure['data'][3]['x'], x1)
-        window_data = figure['data'][3]['y'][i0:i1]
-        maxy = max(window_data) if window_data.size > 0 else 0
-        new_layout['yaxis2']['range'] = [miny*0.98, maxy*1.01]
+            if yaxis in updated_axis:  # In case of multiple traces
+                curr_y_range = new_layout[yaxis]['range']
+                new_y_range = [min(this_y_range[0], curr_y_range[0]),
+                               max(this_y_range[1], curr_y_range[1])]
+            else:
+                new_y_range = list(this_y_range)
 
-        # Feature Level Data
-        i0 = np.searchsorted(figure['data'][4]['x'], x0)
-        i1 = np.searchsorted(figure['data'][4]['x'], x1)
-        miny = min(figure['data'][4]['y'][i0:i1])
-        maxy = max(figure['data'][4]['y'][i0:i1])
-        new_layout['yaxis3']['range'] = [miny*0.98, maxy*1.01]
+            # Update layout range
+            new_layout[xaxis]['range'] = new_x_range
+            new_layout[yaxis]['range'] = new_y_range
+            # Remember visited axis
+            updated_axis.add(yaxis)
 
-    figure['layout'] = new_layout
+        # Replace old layout
+        figure['layout'] = new_layout
 
     return figure
 
 
-logger.info("Building dashboard...")
-app = Dash()
+logger.info('Building dashboard...')
+app = Dash(title='WTI Inventory', external_stylesheets=external_stylesheets)
 
 app.layout = html.Div([
-    html.H1(children='EIA Weekly Petroleum Status Report Dashboard',
-            style={'textAlign': 'center', 'fontFamily': 'sans-serif'}),
+    html.Div([
+        html.H1(children='EIA Weekly Petroleum Status Report Dashboard',
+                className='header-title'),
+            html.P(
+                children=(
+                    'Analysis of EIA Petroleum Inventory and WTI Spot Price'
+                ),
+                className='header-description',
+            ),
+        ],
+        className='header'),
     dcc.Dropdown(inv.columns, 'Commercial Crude',
-                 id='Dropdown', style={'fontFamily': 'sans-serif'}),
-    dcc.Graph(figure=build_figure(), id="Graph")
+                 id='Dropdown', className='menu'),
+    dcc.Graph(figure=build_figure(), id='Graph', className='card')
 ])
 
 
