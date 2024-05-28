@@ -45,6 +45,9 @@ logger.info("Loading WPSR data...")
 stock_summary = pd.read_csv("./reports.csv", index_col=0)
 
 def format_inventory_data(df: pd.DataFrame) -> pd.DataFrame:
+    '''Format inventory DataFrame with report date as index,
+    extract Commercial Crude level from Total Crude stocks and SPR
+    '''
     # Extract report date from endpoint url
     df['Report Date'] = df['Endpoint'].str.extract(r'(\d{4}_\d{2}_\d{2})')
     # Drop URL, Report Date
@@ -80,7 +83,8 @@ model_features = ['Total Motor Gasoline', 'Fuel Ethanol',
 
 # Graph object functions
 def build_market_trace(df: pd.DataFrame) -> list[BaseTraceType]:
-
+    '''Line plot of WTI spot price
+    '''
     trace = go.Scatter(x=df.index,
                        y=df['Close'],
                        mode='lines',
@@ -92,7 +96,8 @@ def build_market_trace(df: pd.DataFrame) -> list[BaseTraceType]:
 def build_bar_trace(df: pd.DataFrame,
                     col: str = 'Commercial Crude (Excluding SPR)'
                     ) -> list[BaseTraceType]:
-
+    '''Bar plot of weekly inventory change for feature `col`
+    '''
     traces = []
 
     deltas = df[col].diff().dropna().copy().to_frame('Change')
@@ -117,7 +122,8 @@ def build_bar_trace(df: pd.DataFrame,
 def build_line_trace(df: pd.DataFrame,
                      col: str = 'Commercial Crude'
                      ) -> list[BaseTraceType]:
-
+    '''Line plot of inventory level for feature `col`
+    '''
     trace = go.Scatter(x=df.index,
                        y=df[col],
                        mode='lines',
@@ -128,6 +134,8 @@ def build_line_trace(df: pd.DataFrame,
 
 
 def build_model_trace(df: pd.DataFrame) -> list[BaseTraceType]:
+    '''Step plot of model `fair` price predictions
+    '''
     last_price_date = oil_prices.index[-1]
 
     X = df[model_features].to_numpy()
@@ -150,7 +158,9 @@ def build_model_trace(df: pd.DataFrame) -> list[BaseTraceType]:
 
 
 def build_figure(col: str = 'Commercial Crude') -> go.Figure:
-
+    '''Construct dashboard figures, defaulting to `col` feature
+    of inventory DataFrame
+    '''
     fig = make_subplots(rows=3,
                         cols=1,
                         shared_xaxes=True,
