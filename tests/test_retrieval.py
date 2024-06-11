@@ -1,7 +1,10 @@
 import unittest
+from unittest.mock import patch, MagicMock
+
 import datetime as dt
 
-from context import extract_archive_uris, filter_uris_by_date
+from context import extract_archive_uris, filter_uris_by_date, get_report_urls
+
 
 
 class TestArchiveExtract(unittest.TestCase):
@@ -41,5 +44,19 @@ class TestURIFilter(unittest.TestCase):
         self.assertEqual(result, ['/petroleum/supply/weekly/archive/2023/2023_11_03_data'])
 
 
+class TestReportURL(unittest.TestCase):
+
+    @patch('scrape.requests')
+    def test_report_urls(self, mock_request):
+
+        example_content = 'hello world /petroleum/supply/weekly/archive/2023/2023_07_19/'.encode('cp1252')
+        mock_response = MagicMock(status_code=200, content=example_content)
+
+        mock_request.get.return_value = mock_response
+
+        expected_urls = ['https://www.eia.gov/petroleum/supply/weekly/archive/2023/2023_07_19/csv/table1.csv']
+        self.assertEqual(get_report_urls(), expected_urls)
+
+        
 if __name__ == '__main__':
     unittest.main()
