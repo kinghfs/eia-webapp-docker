@@ -23,7 +23,7 @@ Navigate to localhost:8050 in your browser.
 Run <code>pip install -r requirements.txt</code> in the command line to install dependencies.
 
 #### Check for newly released reports
-Run <code>python3 async_scrape_eia.py</code>
+Run <code>python3 scrape.py</code>
 
 #### View dashboard in browser
 Run <code>python3 app.py</code>, browse to localhost:8050 to view dashboard.

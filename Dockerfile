@@ -9,4 +9,4 @@ RUN pip3 install -r requirements.txt
 
 COPY . .
 
-CMD python3 async_scrape_eia.py ; python3 app.py
+CMD python3 scrape.py ; python3 app.py

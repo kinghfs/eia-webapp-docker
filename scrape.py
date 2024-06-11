@@ -208,7 +208,10 @@ def add_latest_report_if_new(old_df: pd.DataFrame) -> pd.DataFrame:
     # Check for new release (non-archive)
     latest_url = 'https://ir.eia.gov/wpsr/table1.csv'
     latest_df = download_eia_reports([latest_url], concur_req=1)
-
+	
+    if latest_df.empty:
+        return old_df
+    
     if latest_df.index[-1] != old_df.index[-1]:
         # New release
         df = (latest_df.copy() if old_df.empty
