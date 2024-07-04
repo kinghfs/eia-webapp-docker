@@ -50,6 +50,12 @@ def format_inventory_data(df: pd.DataFrame) -> pd.DataFrame:
     '''
     # Extract report date from endpoint url
     df['Report Date'] = df['Endpoint'].str.extract(r'(\d{4}_\d{2}_\d{2})')
+    
+    if df['Report Date'].iloc[-1] is np.nan:
+        fmt = '%Y_%m_%d'
+        last_valid = dt.datetime.strptime(df['Report Date'].iloc[-2], fmt)
+        df['Report Date'].iloc[-1] = (last_valid + dt.timedelta(days=7)).strftime(fmt)
+
     # Drop URL, Report Date
     df = df.drop('Endpoint', axis=1)
     df = df.reset_index(drop=True)
@@ -58,6 +64,7 @@ def format_inventory_data(df: pd.DataFrame) -> pd.DataFrame:
     df.index = pd.to_datetime(df.index, format='%Y_%m_%d').tz_localize(wall_st)
     # Extract commercial inventory from total crude and SPR
     df['Commercial Crude'] = df['Crude Oil'] - df['SPR']
+    print(df.tail(3))
     return df
 
 inv = format_inventory_data(stock_summary)
